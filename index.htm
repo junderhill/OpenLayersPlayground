@@ -6,18 +6,19 @@
     <!-- The line below is only needed for old environments like Internet Explorer and Android 4.x -->
     <script src="https://cdn.polyfill.io/v2/polyfill.min.js?features=requestAnimationFrame,Element.prototype.classList,URL"></script>
     <script src="https://openlayers.org/en/v4.4.2/build/ol.js"></script>
+    <script src="suncalc.js"></script>
     <script src="https://code.jquery.com/jquery-2.2.3.min.js"></script>
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>
     <style>
-      #marker {
-        width: 20px;
-        height: 20px;
-        border: 1px solid #088;
-        border-radius: 10px;
-        background-color: #0FF;
-        opacity: 0.5;
-      }
+#marker {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #088;
+  border-radius: 10px;
+  background-color: #0FF;
+  opacity: 0.5;
+}
       #vienna {
         text-decoration: none;
         color: white;
@@ -40,13 +41,31 @@
 
         <div>
           <strong>Date/Time</strong></br>
-           <input type="datetime-local" name="datetime" id="datetime">
+          <input type="datetime-local" name="datetime" id="datetime">
         </div>
 
         <div>
           <strong>Centre</strong></br>
           <p id="CenterPointText"></p>
         </div>
+
+        <div>
+          <strong>Sunrise</strong></br>
+          <p id="sunrise"></p>
+        </div>
+        <div>
+          <strong>Morning Golden Hour Ends</strong></br>
+          <p id="goldenHourEnd"></p>
+        </div>
+        <div>
+          <strong>Evening Golden Hour Starts</strong></br>
+          <p id="goldenHour"></p>
+        </div>
+        <div>
+          <strong>Sunset</strong></br>
+          <p id="sunsetStart"></p>
+        </div>
+
 
       </div>
     </div>
@@ -58,67 +77,111 @@
       <div id="popup" title="Welcome to OpenLayers"></div>
     </div>
     <script>
-      var layer = new ol.layer.Tile({
-        source: new ol.source.OSM()
-      });
+var layer = new ol.layer.Tile({
+  source: new ol.source.OSM()
+});
 
-      var map = new ol.Map({
-        layers: [layer],
-        target: 'map',
-        view: new ol.View({
-          center: [0, 0],
-          zoom: 2
-        })
-      });
+var map = new ol.Map({
+  layers: [layer],
+  target: 'map',
+  view: new ol.View({
+    center: [0, 0],
+    zoom: 2
+  })
+});
 
-      var pos = ol.proj.fromLonLat([16.3725, 48.208889]);
+var pos = ol.proj.fromLonLat([16.3725, 48.208889]);
 
-      // Vienna marker
-      var marker = new ol.Overlay({
-        position: pos,
-        positioning: 'center-center',
-        element: document.getElementById('marker'),
-        stopEvent: false
-      });
-      map.addOverlay(marker);
 
-      // Vienna label
-      var vienna = new ol.Overlay({
-        position: pos,
-        element: document.getElementById('vienna')
-      });
-      map.addOverlay(vienna);
+// Popup showing the position the user clicked
+var popup = new ol.Overlay({
+  element: document.getElementById('popup')
+});
+map.addOverlay(popup);
 
-      // Popup showing the position the user clicked
-      var popup = new ol.Overlay({
-        element: document.getElementById('popup')
-      });
-      map.addOverlay(popup);
+map.on('moveend', function(evt){
+  updateTimes();
+});
 
-      map.on('moveend', function(evt){
-        var coordinate = evt.map.getView().getCenter();
-        var hdms = ol.coordinate.toStringHDMS(ol.proj.transform(
-            coordinate, 'EPSG:3857', 'EPSG:4326'));
-        document.getElementById('CenterPointText').innerHTML = hdms;
-      });
+$('#datetime').on('change', function(){
+  updateTimes();
+});
 
-      map.on('click', function(evt) {
-        var element = popup.getElement();
-        var coordinate = evt.coordinate;
-        var hdms = ol.coordinate.toStringHDMS(ol.proj.transform(
-            coordinate, 'EPSG:3857', 'EPSG:4326'));
+function updateTimes(){
+  var coordinate = map.getView().getCenter();
+  var hdms = ol.coordinate.toStringHDMS(ol.proj.transform(coordinate, 'EPSG:3857', 'EPSG:4326'));
+    document.getElementById('CenterPointText').innerHTML = hdms;
+    
+    var lonLat = ol.proj.toLonLat(coordinate, 'EPSG:3857');
+    var times = SunCalc.getTimes(new Date(document.getElementById("datetime").value), lonLat[1], lonLat[0]);
+    
+    document.getElementById('sunrise').innerHTML = times.sunrise.toLocaleTimeString();
+    document.getElementById('goldenHourEnd').innerHTML = times.goldenHourEnd.toLocaleTimeString() ;
+    document.getElementById('goldenHour').innerHTML = times.goldenHour.toLocaleTimeString();
+    document.getElementById('sunsetStart').innerHTML = times.sunsetStart.toLocaleTimeString() ;
+}
 
-        $(element).popover('destroy');
-        popup.setPosition(coordinate);
-        // the keys are quoted to prevent renaming in ADVANCED mode.
-        $(element).popover({
-          'placement': 'top',
-          'animation': false,
-          'html': true,
-          'content': '<p>The location you clicked was:</p><code>' + hdms + '</code>'
-        });
-        $(element).popover('show');
-      });
+
+function drawLines(){
+  drawSunrise();
+}
+
+function drawSunrise(){
+  var coordinate = map.getView().getCenter();
+  var sunrisePosition = getSunrisePosition();
+
+  var constDistance = 50;
+
+  var distantPointLon = constDistance * Math.cos(sunrisePosition.azimuth, coordinate[1], coordinate[0]);
+
+
+  var points = [coordinate, coordinate];
+
+  var featureLine = new ol.Feature({
+    geometry: new ol.geom.LineString(points)
+  });
+
+  var vectorLine = new ol.source.Vector({});
+  vectorLine.addFeature(featureLine);
+
+  var vectorLineLayer = new ol.layer.Vector({
+    source: vectorLine,
+    style: new ol.style.Style({
+      fill: new ol.style.Fill({color: '#00FF00', weight:4}),
+      stroke: new ol.style.Stroke({color: '#00FF00', weight:2})
+    })
+  });
+
+
+  map.addLayer(vectorLineLayer);
+}
+
+function getSunrisePosition(){
+    var coordinate = map.getView().getCenter();
+    var lonLat = ol.proj.toLonLat(coordinate, 'EPSG:3857');
+    var times = SunCalc.getTimes(new Date(document.getElementById("datetime").value), lonLat[1], lonLat[0]);
+
+    var sunrisePosition = SunCalc.getPosition(times.sunrise, lonLat[1], lonLat[0];
+    return sunrisePosition;
+}
+
+map.on('click', function(evt) {
+  var element = popup.getElement();
+  var coordinate = evt.coordinate;
+  var hdms = ol.coordinate.toStringHDMS(ol.proj.transform(
+    coordinate, 'EPSG:3857', 'EPSG:4326'));
+
+    $(element).popover('destroy');
+    popup.setPosition(coordinate);
+    // the keys are quoted to prevent renaming in ADVANCED mode.
+    $(element).popover({
+      'placement': 'top',
+      'animation': false,
+      'html': true,
+      'content': '<p>The location you clicked was:</p><code>' + hdms + '</code>'
+    });
+  $(element).popover('show');
+});
 
 //Function found here: https://gist.github.com/ryanburnette/8803238
 $.fn.setNow = function (onlyBlank) {
@@ -130,7 +193,7 @@ $.fn.setNow = function (onlyBlank) {
     , minutes
     , seconds
     , formattedDateTime
-    ;
+  ;
 
   year = now.getFullYear();
   month = now.getMonth().toString().length === 1 ? '0' + (now.getMonth() + 1).toString() : now.getMonth() + 1;
@@ -151,8 +214,8 @@ $.fn.setNow = function (onlyBlank) {
 }
 
 $(function () {
-    // Handler for .ready() called.
-    $('input[type="datetime-local"]').setNow();
+  // Handler for .ready() called.
+  $('input[type="datetime-local"]').setNow();
 
 });
     </script>
